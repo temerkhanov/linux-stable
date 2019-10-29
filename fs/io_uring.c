@@ -2964,7 +2964,7 @@ static int io_cqring_wait(struct io_ring_ctx *ctx, int min_events,
 		.to_wait	= min_events,
 	};
 	struct io_rings *rings = ctx->rings;
-	int ret;
+	int ret = 0;
 
 	if (io_cqring_events(rings) >= min_events)
 		return 0;
@@ -2982,7 +2982,6 @@ static int io_cqring_wait(struct io_ring_ctx *ctx, int min_events,
 			return ret;
 	}
 
-	ret = 0;
 	iowq.nr_timeouts = atomic_read(&ctx->cq_timeouts);
 	do {
 		prepare_to_wait_exclusive(&ctx->wait, &iowq.wq,
@@ -2991,15 +2990,13 @@ static int io_cqring_wait(struct io_ring_ctx *ctx, int min_events,
 			break;
 		schedule();
 		if (signal_pending(current)) {
-			ret = -ERESTARTSYS;
+			ret = -EINTR;
 			break;
 		}
 	} while (1);
 	finish_wait(&ctx->wait, &iowq.wq);
 
-	restore_saved_sigmask_unless(ret == -ERESTARTSYS);
-	if (ret == -ERESTARTSYS)
-		ret = -EINTR;
+	restore_saved_sigmask_unless(ret == -EINTR);
 
 	return READ_ONCE(rings->cq.head) == READ_ONCE(rings->cq.tail) ? ret : 0;
 }
