@@ -2540,30 +2540,23 @@ static int io_queue_link_head(struct io_ring_ctx *ctx, struct io_kiocb *req,
 
 #define SQE_VALID_FLAGS	(IOSQE_FIXED_FILE|IOSQE_IO_DRAIN|IOSQE_IO_LINK)
 
-static void io_submit_sqe(struct io_ring_ctx *ctx, struct sqe_submit *s,
-			  struct io_submit_state *state, struct io_kiocb **link)
+static void io_submit_sqe(struct io_ring_ctx *ctx, struct io_kiocb *req,
+			  struct sqe_submit *s, struct io_submit_state *state,
+			  struct io_kiocb **link)
 {
 	struct io_uring_sqe *sqe_copy;
-	struct io_kiocb *req;
 	int ret;
 
 	/* enforce forwards compatibility on users */
 	if (unlikely(s->sqe->flags & ~SQE_VALID_FLAGS)) {
 		ret = -EINVAL;
-		goto err;
-	}
-
-	req = io_get_req(ctx, state);
-	if (unlikely(!req)) {
-		ret = -EAGAIN;
-		goto err;
+		goto err_req;
 	}
 
 	ret = io_req_set_file(ctx, s, state, req);
 	if (unlikely(ret)) {
 err_req:
 		io_free_req(req, NULL);
-err:
 		io_cqring_add_event(ctx, s->sqe->user_data, ret);
 		return;
 	}
@@ -2698,9 +2691,18 @@ static int io_submit_sqes(struct io_ring_ctx *ctx, unsigned int nr,
 
 	for (i = 0; i < nr; i++) {
 		struct sqe_submit s;
+		struct io_kiocb *req;
 
-		if (!io_get_sqring(ctx, &s))
+		req = io_get_req(ctx, statep);
+		if (unlikely(!req)) {
+			if (!submitted)
+				submitted = -EAGAIN;
 			break;
+		}
+		if (!io_get_sqring(ctx, &s)) {
+			__io_free_req(req);
+			break;
+		}
 
 		if (io_sqe_needs_user(s.sqe) && !*mm) {
 			mm_fault = mm_fault || !mmget_not_zero(ctx->sqo_mm);
