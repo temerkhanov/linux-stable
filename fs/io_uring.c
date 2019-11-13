@@ -481,13 +481,9 @@ static struct io_kiocb *io_get_timeout_req(struct io_ring_ctx *ctx)
 	struct io_kiocb *req;
 
 	req = list_first_entry_or_null(&ctx->timeout_list, struct io_kiocb, list);
-	if (req) {
-		if (req->flags & REQ_F_TIMEOUT_NOSEQ)
-			return NULL;
-		if (!__io_sequence_defer(ctx, req)) {
-			list_del_init(&req->list);
-			return req;
-		}
+	if (req && !__req_need_defer(req)) {
+		list_del_init(&req->list);
+		return req;
 	}
 
 	return NULL;
