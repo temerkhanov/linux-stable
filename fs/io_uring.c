@@ -327,6 +327,7 @@ struct io_timeout {
 	struct file			*file;
 	u64				addr;
 	int				flags;
+	unsigned			count;
 };
 
 struct io_rw {
@@ -2894,7 +2895,12 @@ static int io_timeout_prep(struct io_kiocb *req, struct io_async_ctx *io,
 	if (flags & ~IORING_TIMEOUT_ABS)
 		return -EINVAL;
 
-	data = &io->timeout;
+	req->timeout.count = READ_ONCE(sqe->off);
+
+	if (!io && io_alloc_async_ctx(req))
+		return -ENOMEM;
+
+	data = &req->io->timeout;
 	data->req = req;
 	req->flags |= REQ_F_TIMEOUT;
 
@@ -2912,7 +2918,6 @@ static int io_timeout_prep(struct io_kiocb *req, struct io_async_ctx *io,
 
 static int io_timeout(struct io_kiocb *req)
 {
-	const struct io_uring_sqe *sqe = req->sqe;
 	unsigned count;
 	struct io_ring_ctx *ctx = req->ctx;
 	struct io_timeout_data *data;
@@ -2934,7 +2939,7 @@ static int io_timeout(struct io_kiocb *req)
 	 * timeout event to be satisfied. If it isn't set, then this is
 	 * a pure timeout request, sequence isn't used.
 	 */
-	count = READ_ONCE(sqe->off);
+	count = req->timeout.count;
 	if (!count) {
 		req->flags |= REQ_F_TIMEOUT_NOSEQ;
 		spin_lock_irq(&ctx->completion_lock);
