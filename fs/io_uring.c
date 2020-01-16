@@ -1835,6 +1835,7 @@ static int io_read(struct io_kiocb *req, struct io_kiocb **nxt,
 	if (!force_nonblock)
 		req->rw.kiocb.ki_flags &= ~IOCB_NOWAIT;
 
+	req->result = 0;
 	io_size = ret;
 	if (req->flags & REQ_F_LINK)
 		req->result = io_size;
@@ -1922,6 +1923,7 @@ static int io_write(struct io_kiocb *req, struct io_kiocb **nxt,
 	if (!force_nonblock)
 		req->rw.kiocb.ki_flags &= ~IOCB_NOWAIT;
 
+	req->result = 0;
 	io_size = ret;
 	if (req->flags & REQ_F_LINK)
 		req->result = io_size;
