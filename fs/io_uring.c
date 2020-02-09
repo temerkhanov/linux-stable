@@ -922,6 +922,8 @@ static inline void io_req_work_grab_env(struct io_kiocb *req,
 		}
 		spin_unlock(&current->fs->lock);
 	}
+	if (!req->work.task_pid)
+		req->work.task_pid = task_pid_vnr(current);
 }
 
 static inline void io_req_work_drop_env(struct io_kiocb *req)
@@ -6462,10 +6464,13 @@ static int io_uring_flush(struct file *file, void *data)
 	struct io_ring_ctx *ctx = file->private_data;
 
 	io_uring_cancel_files(ctx, data);
-	if (fatal_signal_pending(current) || (current->flags & PF_EXITING)) {
-		io_cqring_overflow_flush(ctx, true);
-		io_wq_cancel_all(ctx->io_wq);
-	}
+
+	/*
+	 * If the task is going away, cancel work it may have pending
+	 */
+	if (fatal_signal_pending(current) || (current->flags & PF_EXITING))
+		io_wq_cancel_pid(ctx->io_wq, task_pid_vnr(current));
+
 	return 0;
 }
 
