@@ -4695,10 +4695,20 @@ static void __io_queue_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_kiocb *linked_timeout;
 	struct io_kiocb *nxt = NULL;
+	const struct cred *old_creds = NULL;
 	int ret;
 
 again:
 	linked_timeout = io_prep_linked_timeout(req);
+
+	if (req->work.creds && req->work.creds != current_cred()) {
+		if (old_creds)
+			revert_creds(old_creds);
+		if (old_creds == req->work.creds)
+			old_creds = NULL; /* restored original creds */
+		else
+			old_creds = override_creds(req->work.creds);
+	}
 
 	ret = io_issue_sqe(req, sqe, &nxt, true);
 
@@ -4749,6 +4759,8 @@ done_req:
 			goto punt;
 		goto again;
 	}
+	if (old_creds)
+		revert_creds(old_creds);
 }
 
 static void io_queue_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe)
@@ -4793,7 +4805,6 @@ static inline void io_queue_link_head(struct io_kiocb *req)
 static bool io_submit_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 			  struct io_submit_state *state, struct io_kiocb **link)
 {
-	const struct cred *old_creds = NULL;
 	struct io_ring_ctx *ctx = req->ctx;
 	unsigned int sqe_flags;
 	int ret, id;
@@ -4808,14 +4819,12 @@ static bool io_submit_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 
 	id = READ_ONCE(sqe->personality);
 	if (id) {
-		const struct cred *personality_creds;
-
-		personality_creds = idr_find(&ctx->personality_idr, id);
-		if (unlikely(!personality_creds)) {
+		req->work.creds = idr_find(&ctx->personality_idr, id);
+		if (unlikely(!req->work.creds)) {
 			ret = -EINVAL;
 			goto err_req;
 		}
-		old_creds = override_creds(personality_creds);
+		get_cred(req->work.creds);
 	}
 
 	/* same numerical values with corresponding REQ_F_*, safe to copy */
@@ -4827,8 +4836,6 @@ static bool io_submit_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 err_req:
 		io_cqring_add_event(req, ret);
 		io_double_put_req(req);
-		if (old_creds)
-			revert_creds(old_creds);
 		return false;
 	}
 
@@ -4889,8 +4896,6 @@ err_req:
 		}
 	}
 
-	if (old_creds)
-		revert_creds(old_creds);
 	return true;
 }
 
