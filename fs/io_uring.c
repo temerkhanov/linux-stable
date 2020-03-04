@@ -3474,6 +3474,7 @@ static int io_sync_file_range(struct io_kiocb *req, bool force_nonblock)
 	return 0;
 }
 
+#if defined(CONFIG_NET)
 static int io_setup_async_msg(struct io_kiocb *req,
 			      struct io_async_msghdr *kmsg)
 {
@@ -3491,7 +3492,6 @@ static int io_setup_async_msg(struct io_kiocb *req,
 
 static int io_sendmsg_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
-#if defined(CONFIG_NET)
 	struct io_sr_msg *sr = &req->sr_msg;
 	struct io_async_ctx *io = req->io;
 	int ret;
@@ -3517,14 +3517,10 @@ static int io_sendmsg_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	if (!ret)
 		req->flags |= REQ_F_NEED_CLEANUP;
 	return ret;
-#else
-	return -EOPNOTSUPP;
-#endif
 }
 
 static int io_sendmsg(struct io_kiocb *req, bool force_nonblock)
 {
-#if defined(CONFIG_NET)
 	struct io_async_msghdr *kmsg = NULL;
 	struct socket *sock;
 	int ret;
@@ -3578,14 +3574,10 @@ static int io_sendmsg(struct io_kiocb *req, bool force_nonblock)
 		req_set_fail_links(req);
 	io_put_req(req);
 	return 0;
-#else
-	return -EOPNOTSUPP;
-#endif
 }
 
 static int io_send(struct io_kiocb *req, bool force_nonblock)
 {
-#if defined(CONFIG_NET)
 	struct socket *sock;
 	int ret;
 
@@ -3628,9 +3620,6 @@ static int io_send(struct io_kiocb *req, bool force_nonblock)
 		req_set_fail_links(req);
 	io_put_req(req);
 	return 0;
-#else
-	return -EOPNOTSUPP;
-#endif
 }
 
 static int __io_recvmsg_copy_hdr(struct io_kiocb *req, struct io_async_ctx *io)
@@ -3743,7 +3732,6 @@ static struct io_buffer *io_recv_buffer_select(struct io_kiocb *req,
 static int io_recvmsg_prep(struct io_kiocb *req,
 			   const struct io_uring_sqe *sqe)
 {
-#if defined(CONFIG_NET)
 	struct io_sr_msg *sr = &req->sr_msg;
 	struct io_async_ctx *io = req->io;
 	int ret;
@@ -3768,14 +3756,10 @@ static int io_recvmsg_prep(struct io_kiocb *req,
 	if (!ret)
 		req->flags |= REQ_F_NEED_CLEANUP;
 	return ret;
-#else
-	return -EOPNOTSUPP;
-#endif
 }
 
 static int io_recvmsg(struct io_kiocb *req, bool force_nonblock)
 {
-#if defined(CONFIG_NET)
 	struct io_async_msghdr *kmsg = NULL;
 	struct socket *sock;
 	int ret, cflags = 0;
@@ -3836,14 +3820,10 @@ static int io_recvmsg(struct io_kiocb *req, bool force_nonblock)
 		req_set_fail_links(req);
 	io_put_req(req);
 	return 0;
-#else
-	return -EOPNOTSUPP;
-#endif
 }
 
 static int io_recv(struct io_kiocb *req, bool force_nonblock)
 {
-#if defined(CONFIG_NET)
 	struct io_buffer *kbuf = NULL;
 	struct socket *sock;
 	int ret, cflags = 0;
@@ -3900,15 +3880,10 @@ static int io_recv(struct io_kiocb *req, bool force_nonblock)
 		req_set_fail_links(req);
 	io_put_req(req);
 	return 0;
-#else
-	return -EOPNOTSUPP;
-#endif
 }
-
 
 static int io_accept_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
-#if defined(CONFIG_NET)
 	struct io_accept *accept = &req->accept;
 
 	if (unlikely(req->ctx->flags & (IORING_SETUP_IOPOLL|IORING_SETUP_SQPOLL)))
@@ -3921,12 +3896,8 @@ static int io_accept_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	accept->flags = READ_ONCE(sqe->accept_flags);
 	accept->nofile = rlimit(RLIMIT_NOFILE);
 	return 0;
-#else
-	return -EOPNOTSUPP;
-#endif
 }
 
-#if defined(CONFIG_NET)
 static int __io_accept(struct io_kiocb *req, bool force_nonblock)
 {
 	struct io_accept *accept = &req->accept;
@@ -3957,11 +3928,9 @@ static void io_accept_finish(struct io_wq_work **workptr)
 	__io_accept(req, false);
 	io_steal_work(req, workptr);
 }
-#endif
 
 static int io_accept(struct io_kiocb *req, bool force_nonblock)
 {
-#if defined(CONFIG_NET)
 	int ret;
 
 	ret = __io_accept(req, force_nonblock);
@@ -3970,14 +3939,10 @@ static int io_accept(struct io_kiocb *req, bool force_nonblock)
 		return -EAGAIN;
 	}
 	return 0;
-#else
-	return -EOPNOTSUPP;
-#endif
 }
 
 static int io_connect_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
-#if defined(CONFIG_NET)
 	struct io_connect *conn = &req->connect;
 	struct io_async_ctx *io = req->io;
 
@@ -3994,14 +3959,10 @@ static int io_connect_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 
 	return move_addr_to_kernel(conn->addr, conn->addr_len,
 					&io->connect.address);
-#else
-	return -EOPNOTSUPP;
-#endif
 }
 
 static int io_connect(struct io_kiocb *req, bool force_nonblock)
 {
-#if defined(CONFIG_NET)
 	struct io_async_ctx __io, *io;
 	unsigned file_flags;
 	int ret;
@@ -4039,10 +4000,59 @@ out:
 	io_cqring_add_event(req, ret);
 	io_put_req(req);
 	return 0;
-#else
-	return -EOPNOTSUPP;
-#endif
 }
+#else /* !CONFIG_NET */
+static int io_sendmsg_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+{
+	return -EOPNOTSUPP;
+}
+
+static int io_sendmsg(struct io_kiocb *req, bool force_nonblock)
+{
+	return -EOPNOTSUPP;
+}
+
+static int io_send(struct io_kiocb *req, bool force_nonblock)
+{
+	return -EOPNOTSUPP;
+}
+
+static int io_recvmsg_prep(struct io_kiocb *req,
+			   const struct io_uring_sqe *sqe)
+{
+	return -EOPNOTSUPP;
+}
+
+static int io_recvmsg(struct io_kiocb *req, bool force_nonblock)
+{
+	return -EOPNOTSUPP;
+}
+
+static int io_recv(struct io_kiocb *req, bool force_nonblock)
+{
+	return -EOPNOTSUPP;
+}
+
+static int io_accept_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+{
+	return -EOPNOTSUPP;
+}
+
+static int io_accept(struct io_kiocb *req, bool force_nonblock)
+{
+	return -EOPNOTSUPP;
+}
+
+static int io_connect_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+{
+	return -EOPNOTSUPP;
+}
+
+static int io_connect(struct io_kiocb *req, bool force_nonblock)
+{
+	return -EOPNOTSUPP;
+}
+#endif /* CONFIG_NET */
 
 struct io_poll_table {
 	struct poll_table_struct pt;
