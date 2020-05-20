@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <linux/cpu.h>
 #include <linux/dma-noncoherent.h>
+#include <linux/dma-direct.h>
 #include <linux/gfp.h>
 #include <linux/highmem.h>
 #include <linux/export.h>
@@ -73,7 +74,7 @@ static void dma_cache_maint(dma_addr_t handle, size_t size, u32 op)
 void xen_dma_sync_for_cpu(struct device *dev, dma_addr_t handle,
 		phys_addr_t paddr, size_t size, enum dma_data_direction dir)
 {
-	if (pfn_valid(PFN_DOWN(handle)))
+	if (pfn_valid(PFN_DOWN(dma_to_phys(dev, handle))))
 		arch_sync_dma_for_cpu(dev, paddr, size, dir);
 	else if (dir != DMA_TO_DEVICE)
 		dma_cache_maint(handle, size, GNTTAB_CACHE_INVAL);
@@ -82,7 +83,7 @@ void xen_dma_sync_for_cpu(struct device *dev, dma_addr_t handle,
 void xen_dma_sync_for_device(struct device *dev, dma_addr_t handle,
 		phys_addr_t paddr, size_t size, enum dma_data_direction dir)
 {
-	if (pfn_valid(PFN_DOWN(handle)))
+	if (pfn_valid(PFN_DOWN(dma_to_phys(dev, handle))))
 		arch_sync_dma_for_device(dev, paddr, size, dir);
 	else if (dir == DMA_FROM_DEVICE)
 		dma_cache_maint(handle, size, GNTTAB_CACHE_INVAL);
