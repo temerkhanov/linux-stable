@@ -3548,6 +3548,9 @@ static int io_sendmsg_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	struct io_async_ctx *io = req->io;
 	int ret;
 
+	if (unlikely(req->ctx->flags & IORING_SETUP_IOPOLL))
+		return -EINVAL;
+
 	sr->msg_flags = READ_ONCE(sqe->msg_flags);
 	sr->msg = u64_to_user_ptr(READ_ONCE(sqe->addr));
 	sr->len = READ_ONCE(sqe->len);
@@ -3576,9 +3579,6 @@ static int io_sendmsg(struct io_kiocb *req, bool force_nonblock)
 	struct io_async_msghdr *kmsg = NULL;
 	struct socket *sock;
 	int ret;
-
-	if (unlikely(req->ctx->flags & IORING_SETUP_IOPOLL))
-		return -EINVAL;
 
 	sock = sock_from_file(req->file, &ret);
 	if (sock) {
@@ -3632,9 +3632,6 @@ static int io_send(struct io_kiocb *req, bool force_nonblock)
 {
 	struct socket *sock;
 	int ret;
-
-	if (unlikely(req->ctx->flags & IORING_SETUP_IOPOLL))
-		return -EINVAL;
 
 	sock = sock_from_file(req->file, &ret);
 	if (sock) {
@@ -3788,6 +3785,9 @@ static int io_recvmsg_prep(struct io_kiocb *req,
 	struct io_async_ctx *io = req->io;
 	int ret;
 
+	if (unlikely(req->ctx->flags & IORING_SETUP_IOPOLL))
+		return -EINVAL;
+
 	sr->msg_flags = READ_ONCE(sqe->msg_flags);
 	sr->msg = u64_to_user_ptr(READ_ONCE(sqe->addr));
 	sr->len = READ_ONCE(sqe->len);
@@ -3815,9 +3815,6 @@ static int io_recvmsg(struct io_kiocb *req, bool force_nonblock)
 	struct io_async_msghdr *kmsg = NULL;
 	struct socket *sock;
 	int ret, cflags = 0;
-
-	if (unlikely(req->ctx->flags & IORING_SETUP_IOPOLL))
-		return -EINVAL;
 
 	sock = sock_from_file(req->file, &ret);
 	if (sock) {
@@ -3879,9 +3876,6 @@ static int io_recv(struct io_kiocb *req, bool force_nonblock)
 	struct io_buffer *kbuf = NULL;
 	struct socket *sock;
 	int ret, cflags = 0;
-
-	if (unlikely(req->ctx->flags & IORING_SETUP_IOPOLL))
-		return -EINVAL;
 
 	sock = sock_from_file(req->file, &ret);
 	if (sock) {
