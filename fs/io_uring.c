@@ -957,7 +957,7 @@ static void io_sq_thread_drop_mm(struct io_ring_ctx *ctx)
 static int __io_sq_thread_acquire_mm(struct io_ring_ctx *ctx)
 {
 	if (!current->mm) {
-		if (unlikely(!mmget_not_zero(ctx->sqo_mm)))
+		if (unlikely(!ctx->sqo_mm || !mmget_not_zero(ctx->sqo_mm)))
 			return -EFAULT;
 		use_mm(ctx->sqo_mm);
 	}
@@ -7265,10 +7265,10 @@ static int io_sq_offload_start(struct io_ring_ctx *ctx,
 {
 	int ret;
 
-	mmgrab(current->mm);
-	ctx->sqo_mm = current->mm;
-
 	if (ctx->flags & IORING_SETUP_SQPOLL) {
+		mmgrab(current->mm);
+		ctx->sqo_mm = current->mm;
+
 		ret = -EPERM;
 		if (!capable(CAP_SYS_ADMIN))
 			goto err;
@@ -7312,8 +7312,10 @@ static int io_sq_offload_start(struct io_ring_ctx *ctx,
 	return 0;
 err:
 	io_finish_async(ctx);
-	mmdrop(ctx->sqo_mm);
-	ctx->sqo_mm = NULL;
+	if (ctx->sqo_mm) {
+		mmdrop(ctx->sqo_mm);
+		ctx->sqo_mm = NULL;
+	}
 	return ret;
 }
 
