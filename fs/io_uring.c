@@ -1603,6 +1603,7 @@ static bool __io_kill_linked_timeout(struct io_kiocb *req)
 		return false;
 
 	list_del_init(&link->link_list);
+	link->flags |= REQ_F_COMP_LOCKED;
 	wake_ev = io_link_cancel_timeout(link);
 	req->flags &= ~REQ_F_LINK_TIMEOUT;
 	return wake_ev;
@@ -1660,6 +1661,7 @@ static void __io_fail_links(struct io_kiocb *req)
 		list_del_init(&link->link_list);
 
 		io_cqring_fill_event(link, -ECANCELED);
+		link->flags |= REQ_F_COMP_LOCKED;
 		__io_double_put_req(link);
 		req->flags &= ~REQ_F_LINK_TIMEOUT;
 	}
@@ -5023,6 +5025,7 @@ static int io_timeout_cancel(struct io_ring_ctx *ctx, __u64 user_data)
 		return -EALREADY;
 
 	req_set_fail_links(req);
+	req->flags |= REQ_F_COMP_LOCKED;
 	io_cqring_fill_event(req, -ECANCELED);
 	io_put_req(req);
 	return 0;
