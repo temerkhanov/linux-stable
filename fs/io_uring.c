@@ -341,6 +341,8 @@ struct io_kiocb {
 #define REQ_F_ISREG		2048	/* regular file */
 #define REQ_F_MUST_PUNT		4096	/* must be punted even for NONBLOCK */
 #define REQ_F_TIMEOUT_NOSEQ	8192	/* no timeout sequence */
+#define REQ_F_INFLIGHT		16384	/* on inflight list */
+#define REQ_F_COMP_LOCKED	32768	/* completion under lock */
 	u64			user_data;
 	u32			result;
 	u32			sequence;
@@ -481,9 +483,13 @@ static struct io_kiocb *io_get_timeout_req(struct io_ring_ctx *ctx)
 	struct io_kiocb *req;
 
 	req = list_first_entry_or_null(&ctx->timeout_list, struct io_kiocb, list);
-	if (req && !__req_need_defer(req)) {
-		list_del_init(&req->list);
-		return req;
+	if (req) {
+		if (req->flags & REQ_F_TIMEOUT_NOSEQ)
+			return NULL;
+		if (!__req_need_defer(req)) {
+			list_del_init(&req->list);
+			return req;
+		}
 	}
 
 	return NULL;
@@ -1405,6 +1411,7 @@ static int io_prep_rw(struct io_kiocb *req, bool force_nonblock)
 
 		kiocb->ki_flags |= IOCB_HIPRI;
 		kiocb->ki_complete = io_complete_rw_iopoll;
+		req->result = 0;
 	} else {
 		if (kiocb->ki_flags & IOCB_HIPRI)
 			return -EINVAL;
@@ -1514,7 +1521,7 @@ static int io_import_fixed(struct io_ring_ctx *ctx, int rw,
 		}
 	}
 
-	return 0;
+	return len;
 }
 
 static ssize_t io_import_iovec(struct io_ring_ctx *ctx, int rw,
@@ -2324,6 +2331,12 @@ static int io_timeout(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	if (get_timespec64(&ts, u64_to_user_ptr(sqe->addr)))
 		return -EFAULT;
 
+	if (flags & IORING_TIMEOUT_ABS)
+		mode = HRTIMER_MODE_ABS;
+	else
+		mode = HRTIMER_MODE_REL;
+
+	hrtimer_init(&req->timeout.timer, CLOCK_MONOTONIC, mode);
 	req->flags |= REQ_F_TIMEOUT;
 
 	/*
@@ -2952,6 +2965,7 @@ static void io_submit_sqe(struct io_kiocb *req, struct io_submit_state *state,
 {
 	struct io_uring_sqe *sqe_copy;
 	struct sqe_submit *s = &req->submit;
+	struct io_ring_ctx *ctx = req->ctx;
 	int ret;
 
 	req->user_data = s->sqe->user_data;
@@ -2987,7 +3001,6 @@ err_req:
 		}
 
 		s->sqe = sqe_copy;
-		memcpy(&req->submit, s, sizeof(*s));
 		list_add_tail(&req->list, &prev->link_list);
 	} else if (s->sqe->flags & IOSQE_IO_LINK) {
 		req->flags |= REQ_F_LINK;
