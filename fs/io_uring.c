@@ -4663,6 +4663,7 @@ static void io_async_task_func(struct callback_head *cb)
 	else
 		__io_req_task_cancel(req, -ECANCELED);
 
+	kfree(apoll->double_poll);
 	kfree(apoll);
 }
 
