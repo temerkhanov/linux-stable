@@ -159,7 +159,7 @@ struct io_rings {
 	/*
 	 * Number of completion events lost because the queue was full;
 	 * this should be avoided by the application by making sure
-	 * there are not more requests pending thatn there is space in
+	 * there are not more requests pending than there is space in
 	 * the completion queue.
 	 *
 	 * Written by the kernel, shouldn't be modified by the
@@ -2955,9 +2955,12 @@ static int io_async_buf_func(struct wait_queue_entry *wait, unsigned mode,
 
 	wpq = container_of(wait, struct wait_page_queue, wait);
 
-	ret = wake_page_match(wpq, key);
-	if (ret != 1)
-		return ret;
+	if (!wake_page_match(wpq, key))
+		return 0;
+
+	/* Stop waking things up if the page is locked again */
+	if (test_bit(key->bit_nr, &key->page->flags))
+		return -1;
 
 	list_del_init(&wait->entry);
 
@@ -4535,7 +4538,6 @@ static void io_poll_task_handler(struct io_kiocb *req, struct io_kiocb **nxt)
 	*nxt = io_put_req_find_next(req);
 	spin_unlock_irq(&ctx->completion_lock);
 
-	io_put_req_find_next(req);
 	io_cqring_ev_posted(ctx);
 }
 
@@ -7685,8 +7687,6 @@ static void io_ring_ctx_free(struct io_ring_ctx *ctx)
 	io_mem_free(ctx->sq_sqes);
 
 	percpu_ref_exit(&ctx->refs);
-	io_unaccount_mem(ctx, ring_pages(ctx->sq_entries, ctx->cq_entries),
-			 ACCT_LOCKED);
 	free_uid(ctx->user);
 	put_cred(ctx->creds);
 	kfree(ctx->cancel_hash);
