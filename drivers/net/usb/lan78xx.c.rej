@@ -1,0 +1,16 @@
+--- drivers/net/usb/lan78xx.c
++++ drivers/net/usb/lan78xx.c
+@@ -3824,7 +3871,12 @@ static int lan78xx_probe(struct usb_interface *intf,
+ 	dev->pipe_intr = usb_rcvintpipe(dev->udev,
+ 					dev->ep_intr->desc.bEndpointAddress &
+ 					USB_ENDPOINT_NUMBER_MASK);
+-	period = dev->ep_intr->desc.bInterval;
++	if (int_urb_interval_ms <= 0)
++		period = dev->ep_intr->desc.bInterval;
++	else
++		period = int_urb_interval_ms * INT_URB_MICROFRAMES_PER_MS;
++
++	netif_notice(dev, probe, netdev, "int urb period %d\n", period);
+ 
+ 	maxp = usb_maxpacket(dev->udev, dev->pipe_intr, 0);
+ 	buf = kmalloc(maxp, GFP_KERNEL);
