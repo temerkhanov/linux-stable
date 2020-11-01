@@ -1,0 +1,16 @@
+// Xen configuration for Pi 4
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "brcm,bcm2711";
+
+    fragment@0 {
+        target-path = "/chosen";
+        __overlay__ {
+	    #address-cells = <0x1>;
+	    #size-cells = <0x1>;
+	    stdout-path = "/soc/serial@7e215040";
+        };
+    };
+};
