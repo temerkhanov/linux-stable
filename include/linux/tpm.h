@@ -21,6 +21,7 @@
 #include <linux/acpi.h>
 #include <linux/cdev.h>
 #include <linux/fs.h>
+#include <linux/atomic.h>
 #include <crypto/hash_info.h>
 
 #define TPM_DIGEST_SIZE 20	/* Max TPM v1.2 PCR size */
@@ -125,8 +126,9 @@ struct tpm_chip {
 
 	unsigned int flags;
 
-	int dev_num;		/* /dev/tpm# */
-	unsigned long is_open;	/* only one allowed */
+	int dev_num;		 /* /dev/tpm# */
+	atomic_t refcount;	 /* /dev/tmp# can only be opened once */
+	wait_queue_head_t waitq; /* Wait queue for synchronous ops */
 
 	char hwrng_name[64];
 	struct hwrng hwrng;

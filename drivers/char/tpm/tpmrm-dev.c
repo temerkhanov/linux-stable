@@ -28,6 +28,7 @@ static int tpmrm_open(struct inode *inode, struct file *file)
 	}
 
 	tpm_common_open(file, chip, &priv->priv, &priv->space);
+	atomic_inc(&chip->refcount);
 
 	return 0;
 }
@@ -39,6 +40,8 @@ static int tpmrm_release(struct inode *inode, struct file *file)
 
 	tpm_common_release(file, fpriv);
 	tpm2_del_space(fpriv->chip, &priv->space);
+	atomic_dec(&fpriv->chip->refcount);
+	wake_up_all(&fpriv->chip->waitq);
 	kfree(priv);
 
 	return 0;

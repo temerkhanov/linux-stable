@@ -19,27 +19,32 @@ static int tpm_open(struct inode *inode, struct file *file)
 {
 	struct tpm_chip *chip;
 	struct file_priv *priv;
+	int ret = 0;
 
 	chip = container_of(inode->i_cdev, struct tpm_chip, cdev);
 
 	/* It's assured that the chip will be opened just once,
-	 * by the check of is_open variable, which is protected
-	 * by driver_lock. */
-	if (test_and_set_bit(0, &chip->is_open)) {
+	 * by the check of the chip reference count.
+	 */
+	if (atomic_fetch_inc(&chip->refcount)) {
 		dev_dbg(&chip->dev, "Another process owns this TPM\n");
-		return -EBUSY;
+		ret = -EBUSY;
+		goto out;
 	}
 
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
-	if (priv == NULL)
+	if (priv == NULL) {
+		ret = -ENOMEM;
 		goto out;
+	}
 
 	tpm_common_open(file, chip, priv, NULL);
 
 	return 0;
 
  out:
-	clear_bit(0, &chip->is_open);
+	atomic_dec(&chip->refcount);
+	wake_up_all(&chip->waitq);
 	return -ENOMEM;
 }
 
@@ -51,7 +56,8 @@ static int tpm_release(struct inode *inode, struct file *file)
 	struct file_priv *priv = file->private_data;
 
 	tpm_common_release(file, priv);
-	clear_bit(0, &priv->chip->is_open);
+	atomic_dec(&priv->chip->refcount);
+	wake_up_all(&priv->chip->waitq);
 	kfree(priv);
 
 	return 0;
