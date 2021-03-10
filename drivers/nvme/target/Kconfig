@@ -92,6 +92,6 @@ config NVME_TARGET_VHOST
 	select VHOST
 	select VHOST_RING
 	help
-	  This enabled the NVMe vhost support.
+	  This enables the NVMe vhost support.
 
 	  If unsure, say N.

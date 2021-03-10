@@ -120,110 +120,16 @@ struct nvmet_vhost_ctrl {
 	u32 page_size;
 };
 
-const struct vhost_memory_region *
-find_region(struct vhost_dev *hba, __u64 addr, __u32 len)
-{
-	struct vhost_memory *mem;
-	struct vhost_memory_region *reg;
-	int i;
-
-	if (!hba->memory)
-		return NULL;
-
-	mem = hba->memory;
-	/* linear search is not brilliant, but we really have on the order of 6
-	 * regions in practice */
-	for (i = 0; i < mem->nregions; ++i) {
-		reg = mem->regions + i;
-		if (reg->guest_phys_addr <= addr &&
-		    reg->guest_phys_addr + reg->memory_size - 1 >= addr)
-			return reg;
-	}
-	return NULL;
-}
-
-static bool check_region_boundary(const struct vhost_memory_region *reg,
-				  uint64_t addr, size_t len)
-{
-	unsigned long max_size;
-
-	max_size = reg->memory_size - addr + reg->guest_phys_addr;
-	return (max_size < len);
-}
-
-static void __user *map_to_region(const struct vhost_memory_region *reg,
-				   uint64_t addr)
-{
-	return (void __user *)(unsigned long)
-		(reg->userspace_addr + addr - reg->guest_phys_addr);
-}
-
-static void __user *map_guest_to_host(struct vhost_dev *dev,
-				       uint64_t addr, int size)
-{
-	const struct vhost_memory_region *reg = NULL;
-
-	reg = find_region(dev, addr, size);
-	if (unlikely(!reg))
-		return ERR_PTR(-EPERM);
-
-	if (unlikely(check_region_boundary(reg, addr, size)))
-		return ERR_PTR(-EFAULT);
-
-	return map_to_region(reg, addr);
-}
-
-static int nvmet_vhost_rw(struct vhost_dev *dev, u64 guest_pa,
-		void *buf, uint32_t size, int write)
-{
-	void __user *host_user_va;
-	void *host_kernel_va;
-	struct page *page;
-	uintptr_t offset;
-	int ret;
-
-	host_user_va = map_guest_to_host(dev, guest_pa, size);
-	if (unlikely(!host_user_va)) {
-		pr_warn("cannot map guest addr %p, error %ld\n",
-			(void *)guest_pa, PTR_ERR(host_user_va));
-		return -EINVAL;
-	}
-
-	ret = get_user_pages((unsigned long)host_user_va, 1,
-			     0, &page, NULL);
-	if (unlikely(ret != 1)) {
-		pr_warn("get_user_pages fail!!!\n");
-		return -EINVAL;
-	}
-
-	host_kernel_va = kmap(page);
-	if (unlikely(!host_kernel_va)) {
-		pr_warn("kmap fail!!!\n");
-		put_page(page);
-		return -EINVAL;
-	}
-
-	offset = (uintptr_t)host_user_va & ~PAGE_MASK;
-	if (write)
-		memcpy(host_kernel_va + offset, buf, size);
-	else
-		memcpy(buf, host_kernel_va + offset, size);
-	kunmap(host_kernel_va);
-	put_page(page);
-
-	return 0;
-}
-
 static int nvmet_vhost_read(struct vhost_dev *dev, u64 guest_pa,
 		void *buf, uint32_t size)
 {
-	return nvmet_vhost_rw(dev, guest_pa, buf, size, 0);
+	return vhost_mem_copy_to_user(dev, buf, (void *)guest_pa, size);
 }
 
 static int nvmet_vhost_write(struct vhost_dev *dev, u64 guest_pa,
 		void *buf, uint32_t size)
 {
-	return nvmet_vhost_rw(dev, guest_pa, buf, size, 1);
+	return vhost_mem_copy_from_user(dev, buf, (void *)guest_pa, size);
 }
 
 #define sq_to_vsq(sq) container_of(sq, struct nvmet_vhost_sq, sq)
@@ -314,10 +220,7 @@ static int nvmet_vhost_cq_thread(void *arg)
 {
 	struct nvmet_vhost_cq *sq = arg;
 
-	while (1) {
-		if (kthread_should_stop())
-			break;
-
+	while (!kthread_should_stop()) {
 		nvmet_vhost_post_cqes(sq);
 
 		schedule();
@@ -360,7 +263,9 @@ static int nvmet_vhost_sglist_add(struct nvmet_vhost_ctrl *n, struct scatterlist
 	unsigned int offset, nbytes;
 	int ret;
 
+#if 0
 	host_addr = map_guest_to_host(&n->dev, guest_addr, len);
+#endif
 	if (unlikely(!host_addr)) {
 		pr_warn("cannot map guest addr %p, error %ld\n",
 			(void *)guest_addr, PTR_ERR(host_addr));
@@ -404,7 +309,7 @@ static int nvmet_vhost_map_prp(struct nvmet_vhost_ctrl *n, struct scatterlist *s
 		if (!prp2)
 			goto error;
 		if (len > n->page_size) {
-			u64 prp_list[n->max_prp_ents];
+			u64 *prp_list = kcalloc(n->max_prp_ents, sizeof(u64), GFP_KERNEL);
 			u16 nents, prp_trans;
 			int i = 0;
 
@@ -416,8 +321,10 @@ static int nvmet_vhost_map_prp(struct nvmet_vhost_ctrl *n, struct scatterlist *s
 				u64 prp_ent = le64_to_cpu(prp_list[i]);
 
 				if (i == n->max_prp_ents - 1 && len > n->page_size) {
-					if (!prp_ent || prp_ent & (n->page_size - 1))
+					if (!prp_ent || prp_ent & (n->page_size - 1)) {
+						kfree(prp_list);
 						goto error;
+					}
 					i = 0;
 					nents = (len + n->page_size - 1) >> n->page_bits;
 					prp_trans = min(n->max_prp_ents, nents) * sizeof(u64);
@@ -425,8 +332,10 @@ static int nvmet_vhost_map_prp(struct nvmet_vhost_ctrl *n, struct scatterlist *s
 					prp_ent = le64_to_cpu(prp_list[i]);
 				}
 
-				if (!prp_ent || prp_ent & (n->page_size - 1))
+				if (!prp_ent || prp_ent & (n->page_size - 1)) {
+					kfree(prp_list);
 					goto error;
+				}
 
 				trans_len = min(len, n->page_size);
 				nvmet_vhost_sglist_add(n, sgl, prp_ent, trans_len, is_write);
@@ -434,6 +343,7 @@ static int nvmet_vhost_map_prp(struct nvmet_vhost_ctrl *n, struct scatterlist *s
 				len -= trans_len;
 				i++;
 			}
+			kfree(prp_list);
 		} else {
 			if (prp2 & (n->page_size - 1))
 				goto error;
@@ -446,6 +356,9 @@ static int nvmet_vhost_map_prp(struct nvmet_vhost_ctrl *n, struct scatterlist *s
 error:
 	return -1;
 }
+
+struct nvmet_fabrics_ops vhost_ops = {
+};
 
 static void nvmet_vhost_process_sq(struct nvmet_vhost_sq *sq)
 {
@@ -474,15 +387,15 @@ static void nvmet_vhost_process_sq(struct nvmet_vhost_sq *sq)
 			goto out;
 		}
 
-		ret = nvmet_req_init(&iod->req, &cq->cq, &sq->sq,
-					nvmet_vhost_queue_response);
+		ret = nvmet_req_init(&iod->req, &cq->cq, &sq->sq, &vhost_ops);
 		if (ret) {
 			pr_warn("nvmet_req_init error: ret 0x%x, qid %d\n", ret, sq->sq.qid);
 			goto out;
 		}
-		if (iod->req.data_len) {
-			ret = nvmet_vhost_map_prp(n, iod->sg, cmd->common.prp1,
-					cmd->common.prp2, iod->req.data_len);
+		if (iod->req.transfer_len) {
+			ret = nvmet_vhost_map_prp(n, iod->sg, cmd->common.dptr.prp1,
+						  cmd->common.dptr.prp2,
+						  iod->req.transfer_len);
 			if (ret > 0) {
 				iod->req.sg = iod->sg;
 				iod->req.sg_cnt = ret;
@@ -510,10 +423,7 @@ static int nvmet_vhost_sq_thread(void *opaque)
 {
 	struct nvmet_vhost_sq *sq = opaque;
 
-	while (1) {
-		if (kthread_should_stop())
-			break;
-
+	while (!kthread_should_stop()) {
 		nvmet_vhost_process_sq(sq);
 
 		schedule();
@@ -540,7 +450,7 @@ static int nvmet_vhost_init_cq(struct nvmet_vhost_cq *cq,
 	cq->scheduled = 0;
 	cq->thread = kthread_create(nvmet_vhost_cq_thread, cq, "nvmet_vhost_cq");
 
-	nvmet_cq_init(n->ctrl, &cq->cq, cqid, size);
+	nvmet_cq_setup(n->ctrl, &cq->cq, cqid, size);
 
 	return 0;
 }
@@ -568,7 +478,7 @@ static int nvmet_vhost_init_sq(struct nvmet_vhost_sq *sq,
 		iod = &sq->io_req[i];
 
 		iod->req.cmd = &iod->cmd;
-		iod->req.rsp = &iod->rsp;
+		/* iod->req.rsp = &iod->rsp; */
 		iod->sq = sq;
 		list_add_tail(&iod->entry, &sq->req_list);
 	}
@@ -579,7 +489,7 @@ static int nvmet_vhost_init_sq(struct nvmet_vhost_sq *sq,
 	list_add_tail(&sq->entry, &cq->sq_list);
 	n->sqs[sqid] = sq;
 
-	nvmet_sq_init(n->ctrl, &sq->sq, sqid, size);
+	nvmet_sq_setup(n->ctrl, &sq->sq, sqid, size);
 
 	return 0;
 }
@@ -732,11 +642,11 @@ static int nvmet_vhost_parse_admin_cmd(struct nvmet_req *req)
 	switch (cmd->common.opcode) {
 	case nvme_admin_create_cq:
 		req->execute = nvmet_vhost_create_cq;
-		req->data_len = 0;
+		req->transfer_len = 0;
 		return 0;
 	case nvme_admin_create_sq:
 		req->execute = nvmet_vhost_create_sq;
-		req->data_len = 0;
+		req->transfer_len = 0;
 		return 0;
 	}
 
@@ -752,14 +662,8 @@ nvmet_vhost_set_endpoint(struct nvmet_vhost_ctrl *n,
 	int num_queues;
 	int ret = 0;
 
-	subsys = nvmet_find_subsys(c->vhost_wwpn);
-        if (!subsys) {
-		pr_warn("connect request for invalid subsystem!\n");
-		return -EINVAL;
-	}
-
 	mutex_lock(&subsys->lock);
-	ctrl = nvmet_alloc_ctrl(subsys, c->vhost_wwpn);
+	//ctrl
 	if (IS_ERR(ctrl)) {
 		ret = -EINVAL;
 		goto out_unlock;
@@ -767,9 +671,9 @@ nvmet_vhost_set_endpoint(struct nvmet_vhost_ctrl *n,
 	n->cntlid = ctrl->cntlid;
 	n->ctrl = ctrl;
 	n->num_queues = subsys->max_qid + 1;
-	ctrl->opaque = n;
-	ctrl->start = nvmet_vhost_start_ctrl;
-	ctrl->parse_extra_admin_cmd = nvmet_vhost_parse_admin_cmd;
+	//ctrl->opaque = n;
+	//ctrl->start = nvmet_vhost_start_ctrl;
+	//ctrl->parse_extra_admin_cmd = nvmet_vhost_parse_admin_cmd;
 
 	num_queues = ctrl->subsys->max_qid + 1;
 	n->cqs = kzalloc(sizeof(*n->cqs) * num_queues, GFP_KERNEL);
@@ -844,8 +748,9 @@ static int nvmet_vhost_bar_read(struct nvmet_ctrl *ctrl, int offset, u64 *val)
 	case NVME_REG_CAP:
 		*val = ctrl->cap;
 		break;
-	case NVME_REG_CAP+4:
+	case NVME_REG_CAP + 4:
 		*val = ctrl->cap >> 32;
+		break;
 	case NVME_REG_VS:
 		*val = ctrl->subsys->ver;
 		break;
@@ -1010,7 +915,7 @@ static int nvmet_vhost_open(struct inode *inode, struct file *f)
 		return -ENOMEM;
 
 	/* We don't use virtqueue */
-	vhost_dev_init(&n->dev, NULL, 0);
+	//vhost_dev_init(&n->dev, NULL, 0);
 	f->private_data = n;
 
 	return 0;
@@ -1074,7 +979,7 @@ static int nvmet_vhost_release(struct inode *inode, struct file *f)
 	nvmet_vhost_clear_ctrl(n);
 
 	vhost_dev_stop(&n->dev);
-	vhost_dev_cleanup(&n->dev, false);
+	vhost_dev_cleanup(&n->dev);
 
 	kfree(n);
 	return 0;
