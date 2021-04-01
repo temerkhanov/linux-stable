@@ -289,7 +289,7 @@ static int nvmet_vhost_sglist_add(struct nvmet_vhost_ctrl *ctrl, struct scatterl
 }
 
 static int nvmet_vhost_map_prp(struct nvmet_vhost_ctrl *ctrl, struct scatterlist *sgl,
-	u64 prp1, u64 prp2, unsigned int len)
+			       u64 prp1, u64 prp2, unsigned int len)
 {
 	unsigned int trans_len = ctrl->page_size - (prp1 % ctrl->page_size);
 	int num_prps = (len >> ctrl->page_bits) + 1;
@@ -435,9 +435,9 @@ static int nvmet_vhost_sq_thread(void *opaque)
 }
 
 static int nvmet_vhost_init_cq(struct nvmet_vhost_cq *cq,
-		struct nvmet_vhost_ctrl *ctrl, u64 dma_addr,
-		u16 cqid, u16 size, struct eventfd_ctx *eventfd,
-		u16 vector, u16 irq_enabled)
+			       struct nvmet_vhost_ctrl *ctrl, u64 dma_addr,
+			       u16 cqid, u16 size, struct eventfd_ctx *eventfd,
+			       u16 vector, u16 irq_enabled)
 {
 	cq->ctrl = ctrl;
 	cq->dma_addr = dma_addr;
@@ -458,8 +458,8 @@ static int nvmet_vhost_init_cq(struct nvmet_vhost_cq *cq,
 }
 
 static int nvmet_vhost_init_sq(struct nvmet_vhost_sq *sq,
-		struct nvmet_vhost_ctrl *ctrl, u64 dma_addr,
-		u16 sqid, u16 cqid, u16 size)
+			       struct nvmet_vhost_ctrl *ctrl, u64 dma_addr,
+			       u16 sqid, u16 cqid, u16 size)
 {
 	struct nvmet_vhost_cq *cq;
 	struct nvmet_vhost_iod *iod;
@@ -641,7 +641,7 @@ static int nvmet_vhost_process_iotlb_msg(struct vhost_dev *dev,
 					 struct vhost_iotlb_msg *msg)
 {
 	struct nvmet_vhost_ctrl *ctrl = container_of(dev, struct nvmet_vhost_ctrl, vdev);
-
+	//TODO: Determine if any IOTLB messages need to be processed
 	return 0;
 }
 
@@ -786,6 +786,7 @@ static int nvmet_vhost_bar_read(struct nvmet_ctrl *ctrl, int offset, u64 *val)
 	return status;
 }
 
+//TODO: Reuse the generic bar_write function
 static int nvmet_bar_write(struct nvmet_vhost_ctrl *ctrl, int offset, u64 val)
 {
 	struct nvmet_ctrl *nvme_ctrl = ctrl->ctrl;
@@ -948,7 +949,7 @@ static void nvme_free_sq(struct nvmet_vhost_sq *sq,
 }
 
 static void nvme_free_cq(struct nvmet_vhost_cq *cq,
-		struct nvmet_vhost_ctrl *ctrl)
+			 struct nvmet_vhost_ctrl *ctrl)
 {
 	ctrl->cqs[cq->cq.qid] = NULL;
 	kthread_stop(cq->thread);
@@ -1002,7 +1003,7 @@ static int nvmet_vhost_release(struct inode *inode, struct file *f)
 }
 
 static long nvmet_vhost_ioctl(struct file *f, unsigned int ioctl,
-			     unsigned long arg)
+			      unsigned long arg)
 {
 	struct nvmet_vhost_ctrl *ctrl = f->private_data;
 	struct vhost_nvme_target conf;
@@ -1037,7 +1038,7 @@ static long nvmet_vhost_ioctl(struct file *f, unsigned int ioctl,
 
 #ifdef CONFIG_COMPAT
 static long nvmet_vhost_compat_ioctl(struct file *f, unsigned int ioctl,
-				   unsigned long arg)
+				     unsigned long arg)
 {
 	return nvmet_vhost_ioctl(f, ioctl, (unsigned long)compat_ptr(arg));
 }
