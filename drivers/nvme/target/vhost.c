@@ -668,60 +668,93 @@ static int
 nvmet_vhost_set_endpoint(struct nvmet_vhost_ctrl *ctrl,
 			 struct vhost_nvme_target *nvme_tgt)
 {
-	struct nvmet_subsys *subsys;
 	struct nvmet_ctrl *tgt_ctrl;
 	int num_queues;
 	int ret = 0;
 
-#if 0
-	mutex_lock(&subsys->lock);
-
+	//TODO: Determine if any locking is needed
 	if (IS_ERR(ctrl)) {
-		ret = -EINVAL;
-		goto out_unlock;
+		return -EINVAL;
 	}
+	tgt_ctrl = ctrl->ctrl;
+
 	ctrl->cntlid = tgt_ctrl->cntlid;
 	ctrl->ctrl = tgt_ctrl;
-	ctrl->num_queues = subsys->max_qid + 1;
-	ctrl->opaque = n;
-	//ctrl->start = nvmet_vhost_start_ctrl;
-	//ctrl->parse_extra_admin_cmd = nvmet_vhost_parse_admin_cmd;
 
-	num_queues = ctrl->subsys->max_qid + 1;
-	ctrl->cqs = kzalloc(sizeof(*ctrl->cqs) * num_queues, GFP_KERNEL);
+	ctrl->num_queues = 1;
+#if 0
+	ctrl->num_queues = subsys->max_qid + 1;
+	ctrl->opaque = ctrl;
+	ctrl->start = nvmet_vhost_start_ctrl;
+	ctrl->parse_extra_admin_cmd = nvmet_vhost_parse_admin_cmd;
+#endif
+	num_queues = ctrl->num_queues;
+
+	ctrl->cqs = kzalloc(sizeof(struct nvme_vhost_cq *) * num_queues, GFP_KERNEL);
 	if (!ctrl->cqs) {
 		ret = -ENOMEM;
 		goto out_ctrl_put;
 	}
-	ctrl->sqs = kzalloc(sizeof(*ctrl->sqs) * num_queues, GFP_KERNEL);
+	ctrl->sqs = kzalloc(sizeof(struct nvme_vhost_sq *) * num_queues, GFP_KERNEL);
 	if (!ctrl->sqs) {
 		ret = -ENOMEM;
 		goto free_cqs;
 	}
 
-	ctrl->eventfd = kmalloc(sizeof(struct nvmet_vhost_ctrl_eventfd)
-				* num_queues, GFP_KERNEL);
+	ctrl->eventfd = kmalloc(sizeof(struct nvmet_vhost_ctrl_eventfd) * num_queues,
+				GFP_KERNEL);
 	if (!ctrl->eventfd) {
 		ret = -ENOMEM;
 		goto free_sqs;
 	}
 
-	mutex_unlock(&subsys->lock);
 	return 0;
 
 free_sqs:
 	kfree(ctrl->sqs);
-
 free_cqs:
 	kfree(ctrl->cqs);
-
 out_ctrl_put:
-	nvmet_ctrl_put(ctrl);
+	nvmet_ctrl_put(tgt_ctrl);
 
-out_unlock:
-	mutex_unlock(&subsys->lock);
-#endif
 	return ret;
+}
+
+static int
+nvmet_vhost_clear_endpoint(struct nvmet_vhost_ctrl *ctrl,
+			   struct vhost_nvme_target *nvme_tgt)
+{
+	struct nvmet_ctrl *tgt_ctrl;
+
+	//TODO: Determine if any locking is needed
+	if (IS_ERR(ctrl)) {
+		return -EINVAL;
+	}
+
+	tgt_ctrl = ctrl->ctrl;
+
+	if (IS_ERR(tgt_ctrl)) {
+		return -EINVAL;
+	}
+
+	//TODO: Check if the controller is stopped
+
+	if (ctrl->sqs) {
+		kfree(ctrl->sqs);
+		ctrl->sqs = NULL;
+	}
+	if (ctrl->cqs) {
+		kfree(ctrl->cqs);
+		ctrl->cqs = NULL;
+	}
+	if (ctrl->eventfd) {
+		kfree(ctrl->eventfd);
+		ctrl->eventfd = NULL;
+	}
+
+	nvmet_ctrl_put(tgt_ctrl);
+
+	return 0;
 }
 
 static int nvmet_vhost_set_eventfd(struct nvmet_vhost_ctrl *ctrl, void __user *argp)
@@ -1018,6 +1051,11 @@ static long nvmet_vhost_ioctl(struct file *f, unsigned int ioctl,
 			return -EFAULT;
 
 		return nvmet_vhost_set_endpoint(ctrl, &conf);
+	case VHOST_NVME_CLEAR_ENDPOINT:
+		if (copy_from_user(&conf, argp, sizeof(conf)))
+			return -EFAULT;
+
+		return nvmet_vhost_clear_endpoint(ctrl, &conf);
 	case VHOST_NVME_SET_EVENTFD:
 		r = nvmet_vhost_set_eventfd(ctrl, argp);
 		return r;
